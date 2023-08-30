@@ -1,0 +1,7 @@
+src/*.ko
+src/*.o
+src/*.cmd
+src/*.mod
+src/*.symvers
+src/*.order
+src/*.mod.c

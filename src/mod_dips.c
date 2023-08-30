@@ -1,4 +1,6 @@
 
+#define MOD_NAME "mod_dips: "
+
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -7,17 +9,14 @@
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
 
-MODULE_AUTHOR( "isub <sa-bir@yandex.com>" );
+MODULE_AUTHOR( "isub <sa-bir@yandex.ru>" );
 MODULE_DESCRIPTION( "drop ipsec ip-packets test module" );
 MODULE_LICENSE( "GPL" );
 
-static struct nf_hook_ops gs_sPreroutingBundle;
-static __thread int gs_iItGotOpt;
+static struct nf_hook_ops gs_sHookOps;
+static unsigned int gs_uiItGotIPSEC;
 
-static int moddips_hook_init( void );
-static void moddips_hook_clean( void );
-static unsigned int hook_prerouting( void * priv, struct sk_buff * skb, const struct nf_hook_state * state );
-static int moddips_filter( const struct iphdr * p_psIPHdr );
+static unsigned int hook_fn( void * priv, struct sk_buff * skb, const struct nf_hook_state * state );
 
 /* module_param_string( intra_net, g_mcIntrNet, sizeof( g_mcIntrNet ), 0 );
 module_param_named( innet_msk, g_uiIntraNetMask, int, 0 ); */
@@ -25,79 +24,64 @@ module_param_named( innet_msk, g_uiIntraNetMask, int, 0 ); */
 static int __init moddips_mod_init( void )
 {
 	int iRetVal = 0;
-	printk( KERN_INFO "module started" );
+	printk( KERN_INFO MOD_NAME "module started\n" );
 
-	local_irq_disable();
+	gs_sHookOps.hook = hook_fn;
+	gs_sHookOps.hooknum = NF_INET_PRE_ROUTING;
+	gs_sHookOps.pf = PF_INET;
+	gs_sHookOps.priority = NF_IP_PRI_FIRST;
 
-	iRetVal = moddips_hook_init();
+	iRetVal = nf_register_net_hook( & init_net, & gs_sHookOps );
 
 	return iRetVal;
 }
 
 static void __exit moddips_mod_exit( void )
 {
-	moddips_hook_clean();
-	printk( KERN_INFO "module stopped" );
+	nf_unregister_net_hook( & init_net, & gs_sHookOps );
+	printk( KERN_INFO MOD_NAME "module stopped: it has got '%u' ipsec packets\n", gs_uiItGotIPSEC );
 }
 
-static int moddips_hook_init( void )
+static unsigned int hook_fn( void * priv, struct sk_buff * skb, const struct nf_hook_state * state )
 {
-	/* регистрируем функцию обработки прероутинга */
-	gs_sPreroutingBundle.hook = hook_prerouting;
-	/* gs_sPreroutingBundle.owner = THIS_MODULE; */
-	gs_sPreroutingBundle.hooknum = NF_INET_PRE_ROUTING;
-	gs_sPreroutingBundle.pf = PF_INET;
-	gs_sPreroutingBundle.priority = NF_IP_PRI_FIRST;
+	unsigned int uiRetVal = NF_ACCEPT;
+	struct iphdr * psIPHdr = ip_hdr( skb );
 
-/*	#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,13,0) */
-	nf_register_net_hook( & init_net,  & gs_sPreroutingBundle );
-
-	return 0;
-}
-
-static void moddips_hook_clean( void )
-{
-	/* Удаляем из цепочки hook функцию */
-/*	#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,13,0) */
-	nf_unregister_net_hook( & init_net,  & gs_sPreroutingBundle );
-}
-
-static unsigned int hook_prerouting( void * priv, struct sk_buff * skb, const struct nf_hook_state * state )
-{
-	int iRetVal = NF_ACCEPT;
-
-	struct iphdr * psoIP = ip_hdr( skb );
-
-	if( 0 == moddips_filter( psoIP ) ) {
-	} else {
-	}
-
-	return iRetVal;
-}
-
-static int moddips_filter( const struct iphdr * p_psIPHdr )
-{
-	int iRetVal = 0;
-
-	if( 4 == p_psIPHdr->version ) {
-		/* IPv4 */
-	} else {
-		return 0;
-	}
-
-	if( 5 == p_psIPHdr->ihl ) {
-		/* no parameters */
-		return 0;
-	} else {
-		/* to do analize ip parameters */
-		if( 0 != gs_iItGotOpt ) {
+	do {
+		if( NULL != psIPHdr ) {
 		} else {
-			gs_iItGotOpt = 1;
-			printk( KERN_INFO "it has ip packet with parameters occurred" );
+			break;
 		}
-	}
+		if( 4 == psIPHdr->version ) {	/* IPv4 */
+		} else {
+			break;
+		}
+		if( 5 == psIPHdr->ihl ) {	/* no ip parameters */
+			break;
+		} else {			/* to do analize ip parameters */
+			size_t s = psIPHdr->ihl * 4;
+			unsigned char * pucVal = ((unsigned char *)psIPHdr);
+			size_t i;
+			size_t op_size = 0;
+			for( i = 20; i < s; i += op_size ) {
+				if(  pucVal[ i ] != 130 && pucVal[ i ] != 133 ) { /* there is nothing interesting here */
+				} else {
+					++ gs_uiItGotIPSEC;
+					if( 0 != gs_uiItGotIPSEC % 100 ) {
+			                } else {
+                        			printk( KERN_INFO MOD_NAME "it has got '%u' ipsec packets\n", gs_uiItGotIPSEC );
+					}
+				}
+				op_size = pucVal[ i + 1 ];
+				if( 0 != op_size ) {
+				} else {
+					break;
+				}
+			}
+		}
+	} while( 0 );
 
-	return iRetVal;
+	return uiRetVal;
 }
 
 module_init( moddips_mod_init );
